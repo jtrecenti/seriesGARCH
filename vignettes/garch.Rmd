@@ -1,0 +1,245 @@
+---
+title: "Modelos GARCH"
+author: "Julio Trecenti"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+Moeda:
+
+- meio de troca
+- unidade de medida
+- armazenagem de valor
+
+Fonte de dados currency
+- Board of Governors of the Federal Reserve System
+
+Fonte de dados btc
+- blockchain.info
+
+Bases de dados currency
+
+```{r echo=FALSE, warning=FALSE,message=FALSE}
+library(magrittr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+knitr::opts_chunk$set(echo = TRUE, fig.height = 7.5, fig.width = 7,
+                      warning = FALSE)
+```
+
+```{r eval=FALSE, echo=FALSE}
+u <- 'http://www.federalreserve.gov/datadownload/Build.aspx?rel=H10'
+r0 <- httr::GET(u)
+h <- r0 %>% httr::content('text') %>% xml2::read_html()
+viewstate <- h %>% 
+  rvest::html_node('#__VIEWSTATE') %>% 
+  rvest::html_attr('value')
+eventval <- h %>% 
+  rvest::html_node('#__EVENTVALIDATION') %>% 
+  rvest::html_attr('value')
+vsevgen <- h %>% 
+  rvest::html_node('#__VIEWSTATEGENERATOR') %>% 
+  rvest::html_attr('value')
+d_cur <- list('__EVENTTARGET' = '',
+              '__EVENTARGUMENT' = '',
+              '__VIEWSTATE' = viewstate,
+              '__VIEWSTATEGENERATOR' = vsevgen,
+              '__EVENTVALIDATION' = eventval,
+              'hidScrollTopValue' = '0',
+              'BuildSelect1:KeyList' = 'H10',
+              'BuildSelect1:Listbox0' = 'BRD',
+              'BuildSelect1:Listbox0' = 'MJC',
+              'BuildSelect1:Listbox0' = 'OIT',
+              'BuildSelect1:Listbox0' = 'BRL',
+              'BuildSelect1:Listbox0' = 'CNY',
+              'BuildSelect1:Listbox0' = 'EUR',
+              'BuildSelect1:Listbox0' = 'JPY',
+              # 'BuildSelect1:ListBox1' = '9',
+              'BuildSelect1:Button0' = 'Continue'
+              # 'BuildSelect1:Button1' = 'Add to package'
+              )
+r_cur <- httr::POST(u, body = d_cur)
+h <- r_cur %>% httr::content('text') %>% xml2::read_html()
+viewstate <- h %>% 
+  rvest::html_node('#__VIEWSTATE') %>% 
+  rvest::html_attr('value')
+eventval <- h %>% 
+  rvest::html_node('#__EVENTVALIDATION') %>% 
+  rvest::html_attr('value')
+vsevgen <- h %>% 
+  rvest::html_node('#__VIEWSTATEGENERATOR') %>% 
+  rvest::html_attr('value')
+d_cur2 <- list('__EVENTTARGET' = '',
+              '__EVENTARGUMENT' = '',
+              '__VIEWSTATE' = viewstate,
+              '__VIEWSTATEGENERATOR' = vsevgen,
+              '__EVENTVALIDATION' = eventval,
+              'hidScrollTopValue' = '0',
+              'BuildSelect1:KeyList' = 'H10',
+              'BuildSelect1:Listbox0' = 'BRD',
+              'BuildSelect1:Listbox0' = 'MJC',
+              'BuildSelect1:Listbox0' = 'OIT',
+              'BuildSelect1:Listbox0' = 'BRL',
+              'BuildSelect1:Listbox0' = 'CNY',
+              'BuildSelect1:Listbox0' = 'EUR',
+              'BuildSelect1:Listbox0' = 'JPY',
+              'BuildSelect1:ListBox1' = '9',
+              # 'BuildSelect1:Button0' = 'Continue'
+              'BuildSelect1:Button1' = 'Add to package'
+              )
+r_cur2 <- httr::POST(u, body = d_cur2)
+
+# crawlr:::visualize.response(r_cur2)
+```
+
+## Séries das moedas
+
+```{r}
+d_currency <- readr::read_csv('../data-raw/FRB_H10.csv', skip = 5, na = 'ND') %>% 
+  setNames(c('time_period', 'BRD', 'MJC', 'OIT', 'BRL', 'CNY', 'EUR', 'JPY')) %>% 
+  dplyr::filter(!is.na(BRD)) %>% 
+  dplyr::select(-OIT) %>% 
+  dplyr::filter(time_period >= Sys.Date() - lubridate::years(1))
+
+# https://blockchain.info/pt/charts/market-price
+d_btc <- readr::read_csv('../data-raw/chart-data.csv', col_names = FALSE) %>% 
+  setNames(c('time_period', 'BTC')) %>% 
+  dplyr::mutate(time_period = as.Date(lubridate::dmy_hms(time_period)))
+
+d_total <- d_btc %>% 
+  dplyr::left_join(d_currency, 'time_period')
+
+d_total %>% 
+  tidyr::gather(currency, value, -time_period) %>% 
+  dplyr::filter(!is.na(value)) %>% 
+  # dplyr::mutate(time_period = as.numeric(as.factor(as.character(time_period)))) %>% 
+  ggplot(aes(x = time_period, y = value)) +
+  geom_line() +
+  facet_wrap(~currency, scales = 'free_y', ncol = 2) +
+  scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+- Mostrar datas reais ou igualmente espaçado?
+
+```{r}
+d_total %>% 
+  tidyr::gather(currency, value, -time_period) %>% 
+  dplyr::filter(!is.na(value)) %>% 
+  dplyr::group_by(currency) %>% 
+  dplyr::mutate(time_period = as.numeric(as.factor(as.character(time_period)))) %>%
+  dplyr::ungroup() %>% 
+  ggplot(aes(x = time_period, y = value)) +
+  geom_line() +
+  facet_wrap(~currency, scales = 'free', ncol = 2) +
+  # scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+- Faz sentido utilizar MJC (Nominal Major Currencies Dollar Index) como
+a "carteira das moedas?"
+- Faz sentido considerar BRD (Nominal Broad Dollar Index) na sua análise?
+- O que houve na europa em ago/2015?
+
+```{r}
+d_ret <- d_total %>% 
+  dplyr::mutate_each(dplyr::funs(log(.) - log(lag(.))), -time_period) %>% 
+  dplyr::filter(!is.na(BRD))
+
+d_ret %>% 
+  tidyr::gather(currency, value, -time_period) %>% 
+  # dplyr::mutate(time_period = as.numeric(as.factor(as.character(time_period)))) %>% 
+  ggplot(aes(x = time_period, y = value)) +
+  geom_line() +
+  geom_hline(yintercept = 0, colour = 'red') +
+  facet_wrap(~currency, scales = 'free_y', ncol = 2) +
+  scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+- Mostrar datas reais ou igualmente espaçado?
+
+```{r}
+d_ret %>% 
+  tidyr::gather(currency, value, -time_period) %>% 
+  dplyr::filter(!is.na(value)) %>% 
+  dplyr::group_by(currency) %>% 
+  dplyr::mutate(time_period = as.numeric(as.factor(as.character(time_period)))) %>%
+  dplyr::ungroup() %>% 
+  ggplot(aes(x = time_period, y = value)) +
+  geom_line() +
+  geom_hline(yintercept = 0, colour = 'red') +
+  facet_wrap(~currency, scales = 'free_y', ncol = 2) +
+  # scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+- Podemos observar alguns outliers em BRL, CNY, EUR e JPY
+- Aparentemente as séries de retornos encontram-se em torno de zero
+
+```{r}
+d_ret %>% 
+  tidyr::gather(currency, value, -time_period) %>% 
+  # dplyr::filter(!is.na(value)) %>% 
+  dplyr::group_by(currency) %>% 
+  dplyr::summarise(media = mean(value),
+                   dp = sd(value),
+                   min = min(value),
+                   `q1` = quantile(value, .25),
+                   mediana = median(value),
+                   `q3` = quantile(value, .75),
+                   max = max(value)) %>% 
+  dplyr::mutate_each(dplyr::funs(round(., 3)), -currency) %>% 
+  knitr::kable(align = 'l')
+```
+
+- Também podemos observar que há volatilidade, mas não é tão fácil de identificar
+visualmente em BRL e CNY.
+- As medianas geralmente são próximas de zero.
+- A média dos retornos da BTC é positiva e a maior 
+(ou seja, foi a que mais cresceu no período)
+
+## Modelos iniciais
+
+Os primeiros modelos $GARCH(1,1)$ 
+foram ajustados usando a função `garchFit` do pacote `fGarch`.
+O R possui diversas alternativas para ajuste de modelos GARCH.
+
+```{r, out.width=7, warning=TRUE}
+modelos <- d_ret %>% 
+  tidyr::gather(currency, value, -time_period) %>% 
+  dplyr::filter(!is.na(value)) %>% 
+  dplyr::group_by(currency) %>% 
+  dplyr::do(
+    modelo = fGarch::garchFit(value~garch(1,1), data = ., trace = F)
+  ) %>% 
+  dplyr::ungroup()
+
+alp <- function(model) model@fit$coef['alpha1']
+bet <- function(model) model@fit$coef['beta1']
+
+modelos %>% 
+  dplyr::mutate(alpha = sapply(modelo, alp),
+                beta = sapply(modelo, bet),
+                soma = alpha + beta) %>% 
+  dplyr::select(-modelo) %>% 
+  dplyr::mutate_each(dplyr::funs(round(., 5)), -currency) %>% 
+  knitr::kable(align = 'l')
+```
+
+- Podemos notar que as séries BRD e MJC apresentam a soma dos parâmetros
+próxima a um, o que pode sugerir que, nesse caso, a volatilidade incondicional
+é indefinida e sugere a necessidade de modelos IGARCH.
+- Aparentemente o modelo para BRL não ajustou bem (observe o warning). 
+Precisamos olhar com mais calma.
+- Aparentemente o modelo para BTC não apresentou resultados similares a JPY e CNY,
+mas esse resultado é preliminar.
+
+## Links
+
+- https://cran.r-project.org/web/views/Finance.html
+- http://quantlabs.net/r-blog/2012/06/which-are-my-fave-garch-r-packages-for-financial-forecasting-and-future-a-trading-models-for-lucractive-strategy/
+- http://www.r-bloggers.com/a-practical-introduction-to-garch-modeling/
+- https://www.rmetrics.org/
+
