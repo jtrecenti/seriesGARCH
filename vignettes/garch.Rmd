@@ -96,61 +96,48 @@ r_cur2 <- httr::POST(u, body = d_cur2)
 ## Séries das moedas
 
 ```{r}
-d_currency <- readr::read_csv('../data-raw/FRB_H10.csv', skip = 5, na = 'ND') %>% 
-  setNames(c('time_period', 'BRD', 'MJC', 'OIT', 'BRL', 'CNY', 'EUR', 'JPY')) %>% 
+path <- ifelse(stringr::str_detect(getwd(), 'vignette'),
+               '../data-raw/FRB_H10.csv', 'data-raw/FRB_H10.csv')
+d_currency <- readr::read_csv(path, skip = 5, na = 'ND') %>% 
+  setNames(c('time_period', 'BRD', 'EUR', 'BRL', 'CAD', 'CNY', 'JPY', 'MXN')) %>% 
   dplyr::filter(!is.na(BRD)) %>% 
-  dplyr::select(-OIT) %>% 
-  dplyr::filter(time_period >= Sys.Date() - lubridate::years(1))
+  # dplyr::select(-OIT) %>% 
+  dplyr::filter(time_period >= (Sys.Date() - lubridate::years(1)))
 
 # https://blockchain.info/pt/charts/market-price
-d_btc <- readr::read_csv('../data-raw/chart-data.csv', col_names = FALSE) %>% 
+path2 <- ifelse(stringr::str_detect(getwd(), 'vignette'),
+                '../data-raw/chart-data.csv', 'data-raw/chart-data.csv')
+d_btc <- readr::read_csv(path2, col_names = FALSE) %>% 
   setNames(c('time_period', 'BTC')) %>% 
   dplyr::mutate(time_period = as.Date(lubridate::dmy_hms(time_period)))
 
 d_total <- d_btc %>% 
-  dplyr::left_join(d_currency, 'time_period')
-
-d_total %>% 
+  dplyr::left_join(d_currency, 'time_period') %>% 
   tidyr::gather(currency, value, -time_period) %>% 
-  dplyr::filter(!is.na(value)) %>% 
-  # dplyr::mutate(time_period = as.numeric(as.factor(as.character(time_period)))) %>% 
-  ggplot(aes(x = time_period, y = value)) +
+  dplyr::filter(!is.na(value))
+
+d_ret <- d_total %>% 
+  dplyr::group_by(currency) %>% 
+  dplyr::mutate(value = log(value) - log(lag(value))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::filter(!is.na(value))
+```
+
+```{r}
+ggplot(d_total, aes(x = time_period, y = value)) +
   geom_line() +
   facet_wrap(~currency, scales = 'free_y', ncol = 2) +
   scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-```
-
-- Mostrar datas reais ou igualmente espaçado?
-
-```{r}
-d_total %>% 
-  tidyr::gather(currency, value, -time_period) %>% 
-  dplyr::filter(!is.na(value)) %>% 
-  dplyr::group_by(currency) %>% 
-  dplyr::mutate(time_period = as.numeric(as.factor(as.character(time_period)))) %>%
-  dplyr::ungroup() %>% 
-  ggplot(aes(x = time_period, y = value)) +
-  geom_line() +
-  facet_wrap(~currency, scales = 'free', ncol = 2) +
-  # scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 - Faz sentido utilizar MJC (Nominal Major Currencies Dollar Index) como
 a "carteira das moedas?"
 - Faz sentido considerar BRD (Nominal Broad Dollar Index) na sua análise?
-- O que houve na europa em ago/2015?
+- O que houve na China em ago/2015?
 
-```{r}
-d_ret <- d_total %>% 
-  dplyr::mutate_each(dplyr::funs(log(.) - log(lag(.))), -time_period) %>% 
-  dplyr::filter(!is.na(BRD))
-
-d_ret %>% 
-  tidyr::gather(currency, value, -time_period) %>% 
-  # dplyr::mutate(time_period = as.numeric(as.factor(as.character(time_period)))) %>% 
-  ggplot(aes(x = time_period, y = value)) +
+```{r} 
+ggplot(d_ret, aes(x = time_period, y = value)) +
   geom_line() +
   geom_hline(yintercept = 0, colour = 'red') +
   facet_wrap(~currency, scales = 'free_y', ncol = 2) +
@@ -158,30 +145,11 @@ d_ret %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-- Mostrar datas reais ou igualmente espaçado?
-
-```{r}
-d_ret %>% 
-  tidyr::gather(currency, value, -time_period) %>% 
-  dplyr::filter(!is.na(value)) %>% 
-  dplyr::group_by(currency) %>% 
-  dplyr::mutate(time_period = as.numeric(as.factor(as.character(time_period)))) %>%
-  dplyr::ungroup() %>% 
-  ggplot(aes(x = time_period, y = value)) +
-  geom_line() +
-  geom_hline(yintercept = 0, colour = 'red') +
-  facet_wrap(~currency, scales = 'free_y', ncol = 2) +
-  # scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-```
-
-- Podemos observar alguns outliers em BRL, CNY, EUR e JPY
+- Podemos observar alguns outliers em quase todas as séries
 - Aparentemente as séries de retornos encontram-se em torno de zero
 
 ```{r}
 d_ret %>% 
-  tidyr::gather(currency, value, -time_period) %>% 
-  # dplyr::filter(!is.na(value)) %>% 
   dplyr::group_by(currency) %>% 
   dplyr::summarise(media = mean(value),
                    dp = sd(value),
@@ -208,8 +176,6 @@ O R possui diversas alternativas para ajuste de modelos GARCH.
 
 ```{r, out.width=7, warning=TRUE}
 modelos <- d_ret %>% 
-  tidyr::gather(currency, value, -time_period) %>% 
-  dplyr::filter(!is.na(value)) %>% 
   dplyr::group_by(currency) %>% 
   dplyr::do(
     modelo = fGarch::garchFit(value~garch(1,1), data = ., trace = F)
@@ -228,13 +194,12 @@ modelos %>%
   knitr::kable(align = 'l')
 ```
 
-- Podemos notar que as séries BRD e MJC apresentam a soma dos parâmetros
+- Podemos notar que as séries BRD, BTC e CAD apresentam a soma dos parâmetros
 próxima a um, o que pode sugerir que, nesse caso, a volatilidade incondicional
 é indefinida e sugere a necessidade de modelos IGARCH.
-- Aparentemente o modelo para BRL não ajustou bem (observe o warning). 
+- Aparentemente o modelo para EUR não ajustou bem (observe o warning). 
 Precisamos olhar com mais calma.
-- Aparentemente o modelo para BTC não apresentou resultados similares a JPY e CNY,
-mas esse resultado é preliminar.
+- Aparentemente BTC é realmente uma série muito volátil, comportando-se
 
 ## Links
 
