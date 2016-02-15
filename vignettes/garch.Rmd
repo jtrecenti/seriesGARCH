@@ -96,20 +96,25 @@ r_cur2 <- httr::POST(u, body = d_cur2)
 ## Séries das moedas
 
 ```{r}
+n_obs <- 1000
 path <- ifelse(stringr::str_detect(getwd(), 'vignette'),
                '../data-raw/FRB_H10.csv', 'data-raw/FRB_H10.csv')
 d_currency <- readr::read_csv(path, skip = 5, na = 'ND') %>% 
   setNames(c('time_period', 'BRD', 'EUR', 'BRL', 'CAD', 'CNY', 'JPY', 'MXN')) %>% 
-  dplyr::filter(!is.na(BRD)) %>% 
+  dplyr::filter(!is.na(BRL), !is.na(BRD), !is.na(EUR), !is.na(CAD),
+                !is.na(CNY), !is.na(JPY), !is.na(MXN),
+                time_period <= Sys.Date()) %>% 
   # dplyr::select(-OIT) %>% 
-  dplyr::filter(time_period >= (Sys.Date() - lubridate::years(1)))
+  arrange(desc(time_period)) %>% 
+  slice(1:(n_obs+1))
 
 # https://blockchain.info/pt/charts/market-price
 path2 <- ifelse(stringr::str_detect(getwd(), 'vignette'),
                 '../data-raw/chart-data.csv', 'data-raw/chart-data.csv')
 d_btc <- readr::read_csv(path2, col_names = FALSE) %>% 
   setNames(c('time_period', 'BTC')) %>% 
-  dplyr::mutate(time_period = as.Date(lubridate::dmy_hms(time_period)))
+  dplyr::mutate(time_period = as.Date(lubridate::dmy_hms(time_period))) %>% 
+  dplyr::filter(time_period >= min(d_currency$time_period), time_period <= Sys.Date())
 
 d_total <- d_btc %>% 
   dplyr::left_join(d_currency, 'time_period') %>% 
@@ -127,8 +132,11 @@ d_ret <- d_total %>%
 ggplot(d_total, aes(x = time_period, y = value)) +
   geom_line() +
   facet_wrap(~currency, scales = 'free_y', ncol = 2) +
-  scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  scale_x_date(date_breaks = '3 month', date_labels = '%b/%Y') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab('Valor em dólar') +
+  xlab('Tempo (dias)') +
+  ggsave('series2.png')
 ```
 
 - Faz sentido utilizar MJC (Nominal Major Currencies Dollar Index) como
@@ -141,8 +149,21 @@ ggplot(d_ret, aes(x = time_period, y = value)) +
   geom_line() +
   geom_hline(yintercept = 0, colour = 'red') +
   facet_wrap(~currency, scales = 'free_y', ncol = 2) +
-  scale_x_date(date_breaks = '1 month', date_labels = '%b/%Y') +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  scale_x_date(date_breaks = '3 month', date_labels = '%b/%Y') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab('log-retorno') +
+  xlab('Tempo(dias)') +
+  ggsave('retornos2.png')
+
+ggplot(d_ret, aes(x = time_period, y = value^2)) +
+  geom_line() +
+  geom_hline(yintercept = 0, colour = 'red') +
+  facet_wrap(~currency, scales = 'free_y', ncol = 2) +
+  scale_x_date(date_breaks = '3 month', date_labels = '%b/%Y') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab(expression(log-retorno^2)) +
+  xlab('Tempo(dias)') +
+  ggsave('retornosquad.png')
 ```
 
 - Podemos observar alguns outliers em quase todas as séries
@@ -159,7 +180,9 @@ d_ret %>%
                    `q3` = quantile(value, .75),
                    max = max(value)) %>% 
   dplyr::mutate_each(dplyr::funs(round(., 3)), -currency) %>% 
-  knitr::kable(align = 'l')
+  # write.csv2('tabela2.csv', row.names = F)
+  I()
+  # knitr::kable(align = 'l')
 ```
 
 - Também podemos observar que há volatilidade, mas não é tão fácil de identificar
@@ -168,6 +191,35 @@ visualmente em BRL e CNY.
 - A média dos retornos da BTC é positiva e a maior 
 (ou seja, foi a que mais cresceu no período)
 
+## ACF e PACF dos retornos
+
+```{r}
+
+d_ret %>% 
+  dplyr::group_by(currency) %>% 
+  dplyr::do({
+    bacf <- acf(.$value, plot = FALSE)
+    bacfdf <- with(bacf, data.frame(lag, acf))
+    bpacf <- pacf(.$value, plot = FALSE)
+    bpacfdf <- with(bpacf, data.frame(lag, acf))
+    bacfdf$pacf <- c(NA_real_, bpacfdf$acf)
+    bacfdf$ci <- qnorm((1 + .95) / 2) / sqrt(bacf$n.used)
+    bacfdf[-1,]
+  }) %>% 
+  dplyr::ungroup() %>% 
+  tidyr::gather(tipo_acf, acf, acf, pacf) %>% 
+  ggplot(aes(x = lag, y = acf)) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = lag, yend = 0)) +
+  facet_grid(currency~tipo_acf) +
+  geom_hline(aes(yintercept = ci), colour = 'blue', linetype = 2) +
+  geom_hline(aes(yintercept = - ci), colour = 'blue', linetype = 2) +
+  scale_x_continuous(breaks = 1:25 * 2 - 1) +
+  scale_y_continuous(breaks = c(-1,0,1)/10) +
+  ggsave('acf2.png')
+```
+
+
 ## Modelos iniciais
 
 Os primeiros modelos $GARCH(1,1)$ 
@@ -175,23 +227,23 @@ foram ajustados usando a função `garchFit` do pacote `fGarch`.
 O R possui diversas alternativas para ajuste de modelos GARCH.
 
 ```{r, out.width=7, warning=TRUE}
-modelos <- d_ret %>% 
-  dplyr::group_by(currency) %>% 
-  dplyr::do(
-    modelo = fGarch::garchFit(value~garch(1,1), data = ., trace = F)
-  ) %>% 
-  dplyr::ungroup()
-
-alp <- function(model) model@fit$coef['alpha1']
-bet <- function(model) model@fit$coef['beta1']
-
-modelos %>% 
-  dplyr::mutate(alpha = sapply(modelo, alp),
-                beta = sapply(modelo, bet),
-                soma = alpha + beta) %>% 
-  dplyr::select(-modelo) %>% 
-  dplyr::mutate_each(dplyr::funs(round(., 5)), -currency) %>% 
-  knitr::kable(align = 'l')
+# modelos <- d_ret %>% 
+#   dplyr::group_by(currency) %>% 
+#   dplyr::do(
+#     modelo = fGarch::garchFit(value~garch(1,1), data = ., trace = F)
+#   ) %>% 
+#   dplyr::ungroup()
+# 
+# alp <- function(model) model@fit$coef['alpha1']
+# bet <- function(model) model@fit$coef['beta1']
+# 
+# modelos %>% 
+#   dplyr::mutate(alpha = sapply(modelo, alp),
+#                 beta = sapply(modelo, bet),
+#                 soma = alpha + beta) %>% 
+#   dplyr::select(-modelo) %>% 
+#   dplyr::mutate_each(dplyr::funs(round(., 5)), -currency) %>% 
+#   knitr::kable(align = 'l')
 ```
 
 - Podemos notar que as séries BRD, BTC e CAD apresentam a soma dos parâmetros
@@ -200,6 +252,386 @@ próxima a um, o que pode sugerir que, nesse caso, a volatilidade incondicional
 - Aparentemente o modelo para EUR não ajustou bem (observe o warning). 
 Precisamos olhar com mais calma.
 - Aparentemente BTC é realmente uma série muito volátil, comportando-se
+
+
+## modelos finais
+
+```{r}
+library(forecast)
+library(rugarch)
+library(fGarch)
+
+ajusta_tudo <- function(x, ar = 0, ma = 0, d = 'std') {
+  # GARCH(1,1)
+  spec <- ugarchspec(mean.model = list(armaOrder=c(ar, ma)),
+                     distribution.model = d)
+  g11 <- ugarchfit(x, spec = spec)
+  # GARCH(1,2)
+  spec <- ugarchspec(variance.model = list(garchOrder = c(1, 2)),
+                     distribution.model = d,
+                     mean.model = list(armaOrder=c(ar, ma)))
+  g12 <- ugarchfit(x, spec = spec)
+  # GARCH(2,1)
+  spec <- ugarchspec(variance.model = list(garchOrder = c(2, 1)),
+                     distribution.model = d,
+                     mean.model = list(armaOrder=c(ar, ma)))
+  g21 <- ugarchfit(x, spec = spec)
+  # GARCH(2,2)
+  spec <- ugarchspec(variance.model = list(garchOrder = c(2, 2)),
+                     distribution.model = d,
+                     mean.model = list(armaOrder=c(ar, ma)))
+  g22 <- ugarchfit(x, spec = spec)
+  # iGARCH
+  spec <- ugarchspec(variance.model = list(model = 'iGARCH'),
+                     distribution.model = d,
+                     mean.model = list(armaOrder=c(ar, ma)))
+  gii <- ugarchfit(x, spec = spec)
+  list(g11, g12, g21, g22, gii)
+}
+
+ajusta_tudo2 <- function(x, ar = 1, ma = 0, d = 'std') {
+  # GARCH(1,1)
+  g11 <- garchFit(~garch(1,1), data = x, trace = F, cond.dist = d)
+  # GARCH(1,2)
+  g12 <- garchFit(~garch(1,2), data = x, trace = F, cond.dist = d)
+  # GARCH(2,1)
+  g21 <- garchFit(~garch(2,1), data = x, trace = F, cond.dist = d)
+  # GARCH(2,2)
+  g22 <- garchFit(~garch(2,2), data = x, trace = F, cond.dist = d)
+  # iGARCH
+  # g11 <- garchFit(~garch(1,1), data = x, trace = F)
+  list(g11, g12, g21, g22)
+}
+```
+
+### ARMA
+
+#### CNY
+
+```{r}
+x_cny <- d_ret %>% dplyr::filter(currency == 'CNY') %>% with(value)
+m_arima_cny <- Arima(x_cny, order = c(0, 0, 2))
+# m_arima_cny <- auto.arima(x_cny)
+x_cny <- m_arima_cny$residuals %>% as.numeric()
+```
+
+#### JPY
+
+```{r}
+x_jpy <- d_ret %>% dplyr::filter(currency == 'JPY') %>% with(value)
+m_arima_jpy <- Arima(x_jpy, order = c(2, 0, 2))
+
+x_jpy <- m_arima_jpy$residuals %>% as.numeric()
+
+# acf(x_jpy)
+# pacf(x_jpy)
+
+```
+
+#### BTC
+
+```{r}
+x_btc <- d_ret %>% dplyr::filter(currency == 'BTC') %>% with(value)
+m_arima_btc <- Arima(x_btc, order = c(2, 0, 2))
+# m_arima_btc <- auto.arima(x_btc)
+
+x_btc <- m_arima_btc$residuals %>% as.numeric()
+
+# acf(x_btc, lag.max = 25)
+# pacf(x_btc, lag.max = 25)
+
+
+# mm <- lapply(1:20, function(i) Arima(x, order = c(i, 0, 0)))
+# sapply(mm, AIC) %>% which.min()
+# mm[[16]] %>% AIC
+# 
+# Arima(x, order = c(10, 0, 0)) %>% AIC
+
+# par(mfrow = c(1, 2))
+# acf(x_btc)
+# pacf(x_btc)
+```
+
+#### BRD
+
+```{r}
+x_brd <- d_ret %>% dplyr::filter(currency == 'BRD') %>% with(value)
+m_arima_brd <- Arima(x_brd, order = c(1, 0, 1))
+# m_arima_brd <- auto.arima(x_brd)
+x_brd <- m_arima_brd$residuals %>% as.numeric()
+# 
+# acf(x_brd, lag.max = 25)
+# pacf(x_brd, lag.max = 25)
+```
+
+#### BRL
+
+```{r}
+x_brl <- d_ret %>% dplyr::filter(currency == 'BRL') %>% with(value)
+```
+
+#### CAD
+
+```{r}
+x_cad <- d_ret %>% dplyr::filter(currency == 'CAD') %>% with(value)
+```
+
+#### EUR
+
+```{r}
+x_eur <- d_ret %>% dplyr::filter(currency == 'EUR') %>% with(value)
+```
+
+#### MXN
+
+```{r}
+x_mxn <- d_ret %>% dplyr::filter(currency == 'MXN') %>% with(value)
+```
+
+
+### Series resultantes
+
+```{r}
+f <- function(cur, v) {
+  x <- eval(parse(text = paste0('x_', tolower(cur))))
+  if(length(v) - length(x) > 0) c(rep(NA_real_, length(v) - length(x)), x)
+  else x
+}
+d_ret %>% 
+  group_by(currency) %>% 
+  mutate(value = f(currency[1], value)) %>% 
+  ungroup() %>% 
+  # dplyr::filter(!is.na(value2)) %>% 
+  dplyr::group_by(currency) %>% 
+  dplyr::do({
+    bacf <- acf(.$value, plot = FALSE)
+    bacfdf <- with(bacf, data.frame(lag, acf))
+    bpacf <- pacf(.$value, plot = FALSE)
+    bpacfdf <- with(bpacf, data.frame(lag, acf))
+    bacfdf$pacf <- c(NA_real_, bpacfdf$acf)
+    bacfdf$ci <- qnorm((1 + .95) / 2) / sqrt(bacf$n.used)
+    bacfdf[-1,]
+  }) %>% 
+  dplyr::ungroup() %>% 
+  tidyr::gather(tipo_acf, acf, acf, pacf) %>% 
+  ggplot(aes(x = lag, y = acf)) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = lag, yend = 0)) +
+  facet_grid(currency~tipo_acf) +
+  geom_hline(aes(yintercept = ci), colour = 'blue', linetype = 2) +
+  geom_hline(aes(yintercept = - ci), colour = 'blue', linetype = 2) +
+  scale_x_continuous(breaks = 1:25 * 2 - 1) +
+  scale_y_continuous(breaks = c(-1,0,1)/10) +
+  ggsave('acf3.png')
+```
+
+
+### GARCHs
+
+```{r}
+l <- list(x_cny, x_jpy, x_btc, x_brd, x_brl, x_cad, x_eur, x_mxn)
+lgarch <- l %>% lapply(ajusta_tudo, d = 'std')
+
+aic <- lapply(lgarch, function(x) {
+  f <- failwith(NA_real_, infocriteria)
+  sapply(x, function(k) f(k)[1]) %>% 
+    setNames(c('GARCH(1,1)', 'GARCH(1,2)', 'GARCH(2,1)', 'GARCH(2,2)', 'iGARCH')) %>% 
+    as.data.frame() %>% 
+    dplyr::add_rownames() %>% 
+    setNames(c('modelo', 'aic')) %>% 
+    tidyr::spread(modelo, aic)
+}) %>% 
+  dplyr::bind_rows() %>%
+  dplyr::add_rownames()
+
+dd <- dplyr::data_frame(
+  rowname = as.character(1:8),
+  moeda = c('CNY', 'JPY', 'BTC', 'BRD', 'BRL', 'CAD', 'EUR', 'MXN')
+)
+aic %>% 
+  dplyr::group_by(rowname) %>% 
+  dplyr::do(melhor = which.min(as.numeric(.[,-1]))) %>% 
+  tidyr::unnest(melhor) %>% 
+  dplyr::left_join(aic, "rowname") %>% 
+  dplyr::mutate_each(dplyr::funs(round(., 3)), -rowname, -melhor) %>% 
+  dplyr::left_join(dd, "rowname") %>% 
+  dplyr::select(moeda, everything(), -melhor, -rowname) %>%
+  write.csv2('aic_norm.csv', row.names = FALSE)
+  I()
+
+
+dd <- dplyr::data_frame(
+  rowname = as.character(1:8),
+  moeda = c('CNY', 'JPY', 'BTC', 'BRD', 'BRL', 'CAD', 'EUR', 'MXN')
+)
+lapply(lgarch, function(x) {
+  lapply(x, function(k){
+    vv <- coef(k)
+    if(is.null(vv)) vv <- c(mu = NA_real_)
+    dplyr::data_frame(nm = names(vv), coef = vv) %>% 
+      tidyr::spread(nm, coef)
+  })  %>%
+    dplyr::bind_rows() %>%
+    dplyr::mutate(m = c('GARCH(1,1)', 'GARCH(1,2)', 'GARCH(2,1)', 'GARCH(2,2)', 'iGARCH')) %>%
+    dplyr::filter(m %in% c('GARCH(1,1)', 'iGARCH')) %>%
+    dplyr::select(m, alpha1, beta1, omega) %>%
+    tidyr::gather(key, val, -m) %>%
+    tidyr::unite(m2, m, key, remove = TRUE) %>%
+    tidyr::spread(m2, val) %>%
+    dplyr::select(-iGARCH_alpha1, -iGARCH_omega) %>%
+    dplyr::mutate(V = `GARCH(1,1)_omega` / (1 - `GARCH(1,1)_alpha1` + `GARCH(1,1)_beta1`)) %>%
+    dplyr::select(-`GARCH(1,1)_omega`)
+}) %>% 
+  dplyr::bind_rows() %>%
+  dplyr::add_rownames() %>% 
+  dplyr::left_join(dd, "rowname") %>% 
+  dplyr::select(moeda, everything(), -rowname) %>% 
+  dplyr::mutate_each(dplyr::funs(round(., 6)), -moeda) %>% 
+  dplyr::select(-V) %>% 
+  setNames(c('moeda', 'alpha', 'beta', 'lambda')) %>% 
+  mutate(soma = alpha + beta) %>% 
+  write.csv2('parms.csv', row.names = FALSE) %>%
+  I()
+
+
+lapply(lgarch, function(x) {
+  lapply(x, function(k){
+    vv <- coef(k)
+    if(is.null(vv)) vv <- c(mu = NA_real_)
+    dplyr::data_frame(nm = names(vv), coef = vv) %>% 
+      tidyr::spread(nm, coef)
+  })  
+  
+  # %>%
+  #   dplyr::bind_rows() %>%
+  #   dplyr::mutate(m = c('GARCH(1,1)', 'GARCH(1,2)', 'GARCH(2,1)', 'GARCH(2,2)', 'iGARCH')) %>%
+  #   dplyr::filter(m %in% c('GARCH(1,1)', 'iGARCH')) %>%
+  #   dplyr::select(m, alpha1, beta1, omega) %>%
+  #   tidyr::gather(key, val, -m) %>%
+  #   tidyr::unite(m2, m, key, remove = TRUE) %>%
+  #   tidyr::spread(m2, val) %>%
+  #   dplyr::select(-iGARCH_alpha1, -iGARCH_omega) %>%
+  #   dplyr::mutate(V = `GARCH(1,1)_omega` / (1 - `GARCH(1,1)_alpha1` + `GARCH(1,1)_beta1`)) %>%
+  #   dplyr::select(-`GARCH(1,1)_omega`)
+}) %>% 
+  dplyr::bind_rows() %>%
+  dplyr::add_rownames() %>% 
+  dplyr::left_join(dd, "rowname") %>% 
+  dplyr::select(moeda, everything(), -rowname) %>% 
+  dplyr::mutate_each(dplyr::funs(round(., 6)), -moeda) %>% 
+  dplyr::select(-V) %>% 
+  setNames(c('moeda', 'alpha', 'beta', 'lambda')) %>% 
+  mutate(soma = alpha + beta) %>% 
+  write.csv2('parms.csv', row.names = FALSE) %>%
+  I() %>% 
+
+
+
+
+  
+lapply(lgarch, function(m) {
+  lapply(c(1, 5), function(k) {
+    r <- residuals(m[[k]], standardize = T) ^ 2
+    l <- sapply(c(1, 5, 9), function(i) Box.test(r, i, type = 'Ljung')$p.value)
+    data.frame(lag = c(1,5,9), p = l)
+  }) %>% 
+    bind_rows() %>% 
+    mutate(modelo = rep(c('GARCH(1,1)', 'iGARCH'), each = 3))
+}) %>% 
+  bind_rows() %>% 
+  mutate(rowname = rep(as.character(1:8), each = 6)) %>% 
+  dplyr::left_join(dd, "rowname") %>% 
+  select(-rowname) %>% 
+  unite(res, modelo, lag, sep = ' lag ') %>% 
+  spread(res, p) %>% 
+  write.csv2('ljung2.csv')
+
+
+ggg <- 1
+lapply(lgarch, function(m) {
+  x <- lapply(c(1, 5), function(k) {
+    r <- residuals(m[[k]], standardize = T) ^ 2
+    # l <- sapply(c(1, 5, 9), function(i) Box.test(r, i, type = 'Ljung')$p.value)
+    data.frame(res = r)
+  }) %>% 
+    bind_rows() %>% 
+    mutate(modelo = rep(c('GARCH(1,1)', 'iGARCH'), each = n()/2),
+           rowname = ggg)
+  ggg <<- ggg + 1
+  x
+}) %>% 
+  bind_rows() %>% 
+  mutate(rowname = as.character(rowname)) %>% 
+  dplyr::left_join(dd, "rowname") %>% 
+  select(-rowname) %>%
+  group_by(moeda, modelo) %>% 
+  dplyr::do({
+    bacf <- acf(.$res, plot = FALSE, lag.max = 20)
+    bacfdf <- with(bacf, data.frame(lag, acf))
+    # bpacf <- pacf(.$value, plot = FALSE)
+    # bpacfdf <- with(bpacf, data.frame(lag, acf))
+    # bacfdf$pacf <- c(NA_real_, bpacfdf$acf)
+    bacfdf$ci <- qnorm((1 + .95) / 2) / sqrt(bacf$n.used)
+    bacfdf[-1,]
+  }) %>% 
+  dplyr::ungroup() %>% 
+  ggplot(aes(x = lag, y = acf)) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = lag, yend = 0)) +
+  facet_grid(moeda~modelo, scales = 'free_y') +
+  geom_hline(aes(yintercept = ci), colour = 'blue', linetype = 2) +
+  geom_hline(aes(yintercept = - ci), colour = 'blue', linetype = 2) +
+  scale_x_continuous(breaks = 1:25 * 2 - 1) +
+  scale_y_continuous(breaks = c(-5,0,5)/100) +
+  ggsave('acf_res.png')
+  
+  
+
+```
+
+
+```{r}
+l <- list(x_cny, x_jpy, x_btc, x_brd, x_brl, x_cad, x_eur, x_mxn)
+lgarch2 <- l %>% lapply(ajusta_tudo2, d = 'norm')
+
+
+aic <- lapply(lgarch2, function(x) {
+  sapply(x, function(k) k@fit$ics[1]) %>% 
+    setNames(c('GARCH(1,1)', 'GARCH(1,2)', 'GARCH(2,1)', 'GARCH(2,2)')) %>% 
+    as.data.frame() %>% 
+    dplyr::add_rownames() %>% 
+    setNames(c('modelo', 'aic')) %>% 
+    tidyr::spread(modelo, aic)
+}) %>% 
+  dplyr::bind_rows() %>%
+  dplyr::add_rownames()
+
+dd <- dplyr::data_frame(
+  rowname = as.character(1:8),
+  moeda = c('CNY', 'JPY', 'BTC', 'BRD', 'BRL', 'CAD', 'EUR', 'MXN')
+)
+aic %>% 
+  dplyr::group_by(rowname) %>% 
+  dplyr::do(melhor = which.min(as.numeric(.[,-1]))) %>% 
+  tidyr::unnest(melhor) %>% 
+  dplyr::left_join(aic, "rowname") %>% 
+  dplyr::mutate_each(dplyr::funs(round(., 3)), -rowname, -melhor) %>% 
+  dplyr::left_join(dd, "rowname") 
+
+
+lapply(lgarch2, function(x) {
+  data.frame(a = round(coef(x[[1]]), 4)) %>% 
+    add_rownames() %>%
+    mutate(um = 1) %>% 
+    spread(rowname, a)
+}) %>% 
+  dplyr::bind_rows()
+
+
+
+
+```
+
 
 ## Links
 
