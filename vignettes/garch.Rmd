@@ -1,8 +1,8 @@
 ---
 title: "Modelos GARCH"
 author: "Julio Trecenti"
-date: "`r Sys.Date()`"
-output: word_document
+date: '`r Sys.Date()`'
+output: html_document
 ---
 
 Moeda:
@@ -222,6 +222,7 @@ d_ret %>%
 
 ## Modelos iniciais
 
+
 Os primeiros modelos $GARCH(1,1)$ 
 foram ajustados usando a função `garchFit` do pacote `fGarch`.
 O R possui diversas alternativas para ajuste de modelos GARCH.
@@ -428,7 +429,7 @@ d_ret %>%
 
 ### GARCHs
 
-```{r}
+```{r eval=FALSE}
 l <- list(x_cny, x_jpy, x_btc, x_brd, x_brl, x_cad, x_eur, x_mxn)
 lgarch <- l %>% lapply(ajusta_tudo, d = 'std')
 
@@ -590,7 +591,7 @@ lapply(lgarch, function(m) {
 ```
 
 
-```{r}
+```{r eval=FALSE}
 l <- list(x_cny, x_jpy, x_btc, x_brd, x_brl, x_cad, x_eur, x_mxn)
 lgarch2 <- l %>% lapply(ajusta_tudo2, d = 'norm')
 
